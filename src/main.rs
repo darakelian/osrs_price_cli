@@ -1,6 +1,7 @@
-use std::{collections::HashMap, path::PathBuf, fs::{self, File}, time::SystemTime, io::BufReader};
+use std::{collections::{HashMap, HashSet}, path::PathBuf, fs::{self, File}, time::SystemTime, io::BufReader};
 
 use clap::Parser;
+use num_format::{SystemLocale, ToFormattedString};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -20,7 +21,7 @@ struct ItemMapping {
     name: String
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 struct PriceResult {
     high: Option<u32>,
     low: Option<u32>
@@ -40,7 +41,7 @@ struct Cli {
     force_prices: bool,
     #[arg(short, long, default_value = "./cache_dir")]
     cache_dir: PathBuf,
-    #[arg(short, long)]
+    #[arg(help = "Name of item (matches any item containing this string)")]
     item: String
 }
 
@@ -107,6 +108,11 @@ async fn get_prices(client: &Client, cache_dir: &PathBuf, force_prices: bool) ->
     Ok(results)
 }
 
+fn display_price(name: &String, price: &PriceResult) {
+    let locale = SystemLocale::default().unwrap();
+    println!("{} -> high: {}, low: {}", name, price.high.unwrap_or(0).to_formatted_string(&locale), price.low.unwrap_or(0).to_formatted_string(&locale));
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::builder()
@@ -121,14 +127,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Refresh prices if >5 minutes or user requests new prices
     let prices = get_prices(&client, &cli.cache_dir, cli.force_prices).await?;
 
-    let item_id = mappings.iter().find(|&mapping| mapping.name.eq_ignore_ascii_case(&cli.item)).unwrap().id.to_string();
-
-    // Filter the prices based on the item name
-    let valid_price = prices.data
+    // Get item_ids for all items containing input item
+    let item_ids: HashSet<u32> = HashSet::from_iter(mappings
             .iter()
-            .filter(|kv| kv.0.eq(&item_id))
-            .next()
-            .unwrap();
-    println!("{} prices -> (high: {}, low: {})", &cli.item, valid_price.1.high.unwrap(), valid_price.1.low.unwrap());
+            .filter(|&mapping| mapping.name.to_lowercase().contains(&cli.item))
+            .map(|mapping| mapping.id));
+    
+    // Display the results
+    for item_id in item_ids.iter() {
+        let name = &mappings.iter().find(|&m| m.id == *item_id).unwrap().name;
+        match prices.data.get(&item_id.to_string()) {
+            Some(price) => display_price(&name, &price),
+            None => continue
+        };
+    }
     Ok(())
 }
