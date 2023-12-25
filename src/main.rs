@@ -1,5 +1,4 @@
 use std::{collections::{HashMap, HashSet}, path::PathBuf, fs::{self, File}, time::SystemTime, io::BufReader};
-
 use clap::Parser;
 use num_format::{SystemLocale, ToFormattedString};
 use reqwest::Client;
@@ -108,6 +107,14 @@ async fn get_prices(client: &Client, cache_dir: &PathBuf, force_prices: bool) ->
     Ok(results)
 }
 
+fn get_matching_item_ids(name: &String, mappings: &Vec<ItemMapping>) -> HashSet<u32> {
+    let lower = name.to_lowercase();
+    HashSet::from_iter(mappings
+        .iter()
+        .filter(|&mapping| mapping.name.to_lowercase().contains(&lower))
+        .map(|mapping| mapping.id))
+}
+
 fn display_price(name: &String, price: &PriceResult) {
     let locale = SystemLocale::default().unwrap();
     println!("{} -> high: {}, low: {}", name, price.high.unwrap_or(0).to_formatted_string(&locale), price.low.unwrap_or(0).to_formatted_string(&locale));
@@ -128,10 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let prices = get_prices(&client, &cli.cache_dir, cli.force_prices).await?;
 
     // Get item_ids for all items containing input item
-    let item_ids: HashSet<u32> = HashSet::from_iter(mappings
-            .iter()
-            .filter(|&mapping| mapping.name.to_lowercase().contains(&cli.item))
-            .map(|mapping| mapping.id));
+    let item_ids: HashSet<u32> = get_matching_item_ids(&cli.item, &mappings);
     
     // Display the results
     for item_id in item_ids.iter() {
@@ -142,4 +146,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_name_matching() {
+        let client = Client::new();
+        
+        let mut cache_dir = env::current_dir().unwrap();
+        cache_dir.push("src");
+        cache_dir.push("test_data");
+
+        let mappings = get_mappings(&client, &cache_dir, false).await.unwrap();
+        
+        let single_name_ids = get_matching_item_ids(&String::from("Zulrah's scales"), &mappings);
+        assert_eq!(single_name_ids.len(), 1);
+
+        let multi_name_ids = get_matching_item_ids(&String::from("twisted"), &mappings);
+        assert_eq!(multi_name_ids.len(), 23);
+    }
 }
