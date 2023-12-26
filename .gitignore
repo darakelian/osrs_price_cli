@@ -1,0 +1,5 @@
+/target/
+/cache_dir/
+/test/
+/.vscode/
+.direnv/
